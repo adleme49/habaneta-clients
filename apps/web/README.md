@@ -25,7 +25,7 @@ npm run preview    # serve the build locally
 
 ### Backend
 
-The image-import flow ("Import image" in the library) talks to a separate Rust service — `habaneta-backend` (`~/projects/habaneta/habaneta-backend`). The frontend reaches it at `http://localhost:8080` by default and falls back to that when the env var is unset.
+The image-import flow ("Import image" in the library) talks to a separate Rust service — `habaneta-backend` (`~/projects/habaneta/repos/backend`). The frontend reaches it at `http://localhost:8080` by default and falls back to that when the env var is unset.
 
 Override with `VITE_HABANETA_API` to point at a different host, e.g. for staging or a remote dev box. See `.env.example`.
 
