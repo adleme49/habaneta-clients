@@ -197,7 +197,10 @@ function patternToTileSource(p: PatternResponse): TileSource {
     source: 'user',
     pipeline: p.pipeline,
     captured: {
-      at: p.captured_at,
+      // A pattern without a capture (authored, generated) has no capture time;
+      // fall back to when the record was created so the detail view always
+      // has something true to show.
+      at: p.captured_at ?? p.created_at,
       geoLat: p.geo_lat,
       geoLng: p.geo_lng,
       placeName: p.place_name,

@@ -44,7 +44,11 @@ export default function PatternDetail() {
         <Text style={styles.meta}>📍 {data.place_name}</Text>
       ) : null}
       <Text style={styles.metaSmall}>
-        Captured {new Date(data.captured_at).toLocaleString()}
+        {/* A pattern with no capture behind it has no capture time; fall back
+            to when the record was created so this line is always true. */}
+        {data.captured_at
+          ? `Captured ${new Date(data.captured_at).toLocaleString()}`
+          : `Added ${new Date(data.created_at).toLocaleString()}`}
       </Text>
 
       <View style={styles.thumbWrap}>

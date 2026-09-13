@@ -96,6 +96,12 @@ export async function getJobResult(jobId: string): Promise<PipelineOutput> {
  * timeout / abort / job failure. Caller can pipe `onStatus` to drive
  * a "queued / running / done" UI.
  */
+/** A finished import: the output plus the job that produced it. */
+export interface ImportResult {
+  jobId: string;
+  output: PipelineOutput;
+}
+
 export async function runImageImport(
   fileUri: string,
   opts: {
@@ -103,7 +109,7 @@ export async function runImageImport(
     params?: JobParams;
     onStatus?: (s: JobStatus) => void;
   } = {}
-): Promise<PipelineOutput> {
+): Promise<ImportResult> {
   const jobId = await submitJob(
     fileUri,
     opts.contentType ?? 'image/jpeg',
@@ -121,7 +127,7 @@ export async function runImageImport(
       last = status;
       opts.onStatus?.(status);
     }
-    if (status === 'done') return getJobResult(jobId);
+    if (status === 'done') return { jobId, output: await getJobResult(jobId) };
     if (status === 'failed') {
       throw new HabanetaApiError(error ?? 'image import failed');
     }
@@ -157,6 +163,13 @@ export interface NewPattern {
   place_name?: string | null;
   pipeline: PipelineOutput;
   layers: Record<string, string>;
+  /**
+   * The job that produced `pipeline`. Additive: with it the backend records
+   * the settings and pipeline version behind this pattern.
+   */
+  job_id?: string;
+  /** Where the photo came from. Recorded on the capture. */
+  source?: 'web' | 'mobile';
 }
 
 async function requestUploadUrl(contentType: string): Promise<{
