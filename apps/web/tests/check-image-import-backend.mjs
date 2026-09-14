@@ -11,16 +11,29 @@ import { chromium } from 'playwright';
 const BACKEND_URL = process.env.VITE_HABANETA_API ?? 'http://localhost:8080';
 const FRONTEND_URL = `${process.env.WEB_URL || 'http://localhost:3000'}`;
 
+// When the backend URL was given explicitly we are pointed at a deployed
+// environment on purpose, so an unreachable backend is a failure. Falling back
+// to the localhost default means nobody started one locally, which stays a skip.
+const BACKEND_EXPLICIT = Boolean(process.env.VITE_HABANETA_API);
+
 async function backendReachable() {
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 1500);
-    const res = await fetch(`${BACKEND_URL}/healthz`, { signal: ctrl.signal });
-    clearTimeout(t);
-    return res.ok;
-  } catch {
-    return false;
+  // A suspended Fly machine takes a few seconds to wake, so the first probe
+  // against a deployed environment routinely exceeds a short timeout.
+  const attempts = BACKEND_EXPLICIT ? 3 : 1;
+  const timeoutMs = BACKEND_EXPLICIT ? 10000 : 1500;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      const res = await fetch(`${BACKEND_URL}/healthz`, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (res.ok) return true;
+    } catch {
+      /* retry */
+    }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 2000));
   }
+  return false;
 }
 
 /**
@@ -44,6 +57,16 @@ async function r2Configured() {
 }
 
 if (!(await backendReachable())) {
+  if (BACKEND_EXPLICIT) {
+    // Exiting 0 here would let a staging or production run that never connected
+    // report as a pass — the same "green for the wrong reason" failure this
+    // file's floor-preview assertion used to have.
+    console.error(
+      `image-import-backend smoke failed: backend not reachable at ${BACKEND_URL}/healthz ` +
+        `(VITE_HABANETA_API was set, so this is a real failure, not a skip)`
+    );
+    process.exit(1);
+  }
   console.log(`[skip] habaneta-backend not reachable at ${BACKEND_URL}/healthz`);
   process.exit(0);
 }
@@ -208,9 +231,15 @@ try {
   await page.locator('#grid-pattern-select').selectOption('pinwheel');
   await page.waitForTimeout(400);
 
+  // Scope every floor-preview probe to #grid. The same wrapper markup renders the
+  // library/recents thumbnails in the sidebar, so a document-wide selector also
+  // matches every other saved pattern — and the assertions below would then be
+  // describing whichever tile happens to sit first in the DOM rather than the
+  // preview. Only shows up once the library holds more than one user pattern,
+  // which is why it passed locally against an empty database and failed on staging.
   const rotProbe = await page.evaluate(() => {
     const wrappers = Array.from(
-      document.querySelectorAll('div[style*="--habaneta-layer-0"]')
+      document.querySelectorAll('#grid div[style*="--habaneta-layer-0"]')
     );
     const rotated = wrappers.filter((w) =>
       /transform:\s*rotate\([^0]/.test(w.getAttribute('style') ?? '')
@@ -223,14 +252,17 @@ try {
   }
 
   // The pinned magenta should still be in effect on the floor preview.
-  const floorVar = await page.evaluate(() =>
-    document
-      .querySelectorAll('div[style*="--habaneta-layer-0"]')[0]
-      ?.style.getPropertyValue('--habaneta-layer-0')
-      .trim()
+  const floorVars = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('#grid div[style*="--habaneta-layer-0"]')).map((w) =>
+      w.style.getPropertyValue('--habaneta-layer-0').trim()
+    )
   );
-  if (floorVar !== '#ff00ff') {
-    fail(`floor preview lost the pinned override; got ${floorVar}`);
+  if (floorVars.length === 0) fail('no v2 wrappers in the floor preview grid');
+  const unpinned = floorVars.filter((v) => v !== '#ff00ff');
+  if (unpinned.length > 0) {
+    fail(
+      `floor preview lost the pinned override on ${unpinned.length}/${floorVars.length} cells; saw ${[...new Set(unpinned)].join(', ')}`
+    );
   }
 
   // ---- 6. PNG export of a v2 design fires and produces a valid PNG ----
