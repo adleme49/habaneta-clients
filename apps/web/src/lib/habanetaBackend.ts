@@ -120,10 +120,21 @@ export interface PollOptions {
  * exponential backoff. Aborts cleanly via `signal` (caller's responsibility
  * to wire a controller — e.g. from a React effect cleanup).
  */
+/**
+ * A finished import: the pipeline output plus the job that produced it.
+ * The job id is what lets `POST /v1/patterns` record the settings and
+ * pipeline version behind a saved pattern — without it the backend has no
+ * way to know which run the output came from.
+ */
+export interface ImportResult {
+  jobId: string;
+  output: PipelineOutput;
+}
+
 export async function runImageImport(
   file: File,
   opts: PollOptions = {}
-): Promise<PipelineOutput> {
+): Promise<ImportResult> {
   const initial = opts.initialIntervalMs ?? 250;
   const max = opts.maxIntervalMs ?? 2000;
   const timeout = opts.timeoutMs ?? 60_000;
@@ -145,7 +156,7 @@ export async function runImageImport(
       onStatus?.(status);
     }
     if (status === 'done') {
-      return getJobResult(jobId, signal);
+      return { jobId, output: await getJobResult(jobId, signal) };
     }
     if (status === 'failed') {
       throw new HabanetaBackendError(error ?? 'Job failed');

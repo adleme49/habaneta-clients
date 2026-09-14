@@ -36,6 +36,14 @@ export interface NewPattern {
   place_name?: string | null;
   pipeline: PipelineOutput;
   layers: Dict<string>;
+  /**
+   * The job that produced `pipeline`. Additive: with it the backend records
+   * the settings and pipeline version behind this pattern, so it can be
+   * reproduced, re-run and compared. Without it the pattern still saves.
+   */
+  job_id?: string;
+  /** Where the photo came from. Recorded on the capture. */
+  source?: 'web' | 'mobile';
 }
 
 export interface PatchPattern {

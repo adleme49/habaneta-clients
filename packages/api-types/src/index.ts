@@ -95,13 +95,30 @@ export interface Pattern {
   name: string;
   family: string;
   kind: 'floor' | 'border';
-  photo_key: string;
-  captured_at: string; // ISO timestamp
+  /**
+   * How the pattern came to be. `captured` is the only value produced today;
+   * the others exist because a pattern no longer has to come from a photo.
+   */
+  origin: 'captured' | 'authored' | 'generated' | 'remixed' | 'imported';
+  /**
+   * The capture behind this pattern. Null for a pattern with no photo —
+   * authored in the editor, or generated. Nothing produces those yet.
+   */
+  photo_key: string | null;
+  captured_at: string | null; // ISO timestamp
   geo_lat: number | null;
   geo_lng: number | null;
   place_name: string | null;
   pipeline: PipelineOutput;
+  /** Effective colours: the default colourway's overrides. */
   layers: Record<string, string>;
+  /**
+   * The pipeline version and settings that produced this pattern, from its
+   * derivation. Null for patterns saved before runs were recorded, and for
+   * any save that doesn't pass a `job_id`.
+   */
+  pipeline_version: string | null;
+  params: JobParams | null;
   created_at: string;
   updated_at: string;
 }

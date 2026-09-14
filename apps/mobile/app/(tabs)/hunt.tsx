@@ -36,6 +36,9 @@ export default function HuntScreen() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [pipeline, setPipeline] = useState<PipelineOutput | null>(null);
+  // The run that produced `pipeline`. Sent on save so the pattern records
+  // what settings and pipeline version made it.
+  const [jobId, setJobId] = useState<string | null>(null);
   const [geo, setGeo] = useState<CaptureGeo | null>(null);
   const [name, setName] = useState('');
   const [statusLine, setStatusLine] = useState('');
@@ -45,6 +48,7 @@ export default function HuntScreen() {
     setPhase('idle');
     setPhotoUri(null);
     setPipeline(null);
+    setJobId(null);
     setGeo(null);
     setName('');
     setStatusLine('');
@@ -99,11 +103,12 @@ export default function HuntScreen() {
     setStatusLine('uploading…');
     const geoPromise = captureGeoBestEffort();
     try {
-      const out = await runImageImport(asset.uri, {
+      const imported = await runImageImport(asset.uri, {
         contentType: asset.mimeType ?? 'image/jpeg',
         onStatus: (s) => setStatusLine(s),
       });
-      setPipeline(out);
+      setPipeline(imported.output);
+      setJobId(imported.jobId);
       const g = await geoPromise;
       setGeo(g);
       // Auto-fill name with reverse-geocoded place if we got one.
@@ -130,11 +135,12 @@ export default function HuntScreen() {
     setPhase('analyzing');
     setStatusLine('uploading…');
     try {
-      const out = await runImageImport(asset.uri, {
+      const imported = await runImageImport(asset.uri, {
         contentType: asset.mimeType ?? 'image/jpeg',
         onStatus: (s) => setStatusLine(s),
       });
-      setPipeline(out);
+      setPipeline(imported.output);
+      setJobId(imported.jobId);
       setPhase('review');
       setStatusLine('');
     } catch (err) {
@@ -168,6 +174,8 @@ export default function HuntScreen() {
         place_name: geo?.placeName ?? null,
         pipeline,
         layers,
+        ...(jobId ? { job_id: jobId } : {}),
+        source: 'mobile',
       });
       qc.invalidateQueries({ queryKey: ['patterns'] });
       reset();

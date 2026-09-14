@@ -77,6 +77,9 @@ const ImageImportDialog: React.FC = () => {
     useState<PaletteAdjustments>(NO_ADJUSTMENTS);
   // null = not yet checked; true/false = result of last health check.
   const [backendUp, setBackendUp] = useState<boolean | null>(null);
+  // The run that produced `pipeline`. Sent on save so the pattern records
+  // what settings and pipeline version made it.
+  const [jobId, setJobId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const saveMutation = useSavePatternMutation();
 
@@ -87,6 +90,7 @@ const ImageImportDialog: React.FC = () => {
     setFile(null);
     setImagePreviewUrl(null);
     setPipeline(null);
+    setJobId(null);
     setStatus('idle');
     setError(null);
     setDisplayName('');
@@ -178,7 +182,8 @@ const ImageImportDialog: React.FC = () => {
         params: buildJobParams(),
       });
       if (ctrl.signal.aborted) return;
-      setPipeline(result);
+      setPipeline(result.output);
+      setJobId(result.jobId);
       setStatus('done');
     } catch (e) {
       if (ctrl.signal.aborted) return;
@@ -214,7 +219,8 @@ const ImageImportDialog: React.FC = () => {
           family,
           overrides,
           adjustments,
-          file
+          file,
+          jobId
         ),
       });
       close();
@@ -686,7 +692,8 @@ function pipelineToPatternRequest(
   family: string,
   overrides: Dict<string>,
   adjustments: PaletteAdjustments,
-  file: File
+  file: File,
+  jobId: string | null
 ): Omit<NewPattern, 'photo_key'> {
   const atom = pipeline.atoms[0];
   if (!atom) throw new Error('PipelineOutput has no atoms');
@@ -709,6 +716,8 @@ function pipelineToPatternRequest(
     captured_at: capturedAt,
     pipeline,
     layers,
+    ...(jobId ? { job_id: jobId } : {}),
+    source: 'web',
   };
 }
 
