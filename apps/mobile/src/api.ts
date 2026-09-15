@@ -7,12 +7,18 @@
 
 import Constants from 'expo-constants';
 import type {
-  JobParams,
+  JobParamsInput,
   JobStatus,
   JobStatusResponse,
-  Pattern,
+  NewPattern,
+  PatternResponse,
   PipelineOutput,
 } from '@habaneta/api-types';
+
+// Re-exported for the screens that import these from here. The definitions
+// live in @habaneta/api-types, generated from the backend's OpenAPI document —
+// never re-declare a wire shape in an app.
+export type { NewPattern, PatternResponse };
 
 const BASE_URL: string =
   (Constants.expoConfig?.extra as { habanetaApi?: string } | undefined)
@@ -57,7 +63,7 @@ export async function checkHealth(): Promise<boolean> {
 export async function submitJob(
   fileUri: string,
   contentType: string,
-  params?: JobParams
+  params?: JobParamsInput
 ): Promise<string> {
   // RN's fetch supports FormData with `{ uri, name, type }` shaped
   // file references — the runtime streams from disk without copying
@@ -106,7 +112,7 @@ export async function runImageImport(
   fileUri: string,
   opts: {
     contentType?: string;
-    params?: JobParams;
+    params?: JobParamsInput;
     onStatus?: (s: JobStatus) => void;
   } = {}
 ): Promise<ImportResult> {
@@ -138,9 +144,7 @@ export async function runImageImport(
 
 // ---------- Patterns ----------
 
-export interface PatternResponse extends Pattern {
-  photo_url?: string | null;
-}
+// ---------- Patterns ----------
 
 export async function listPatterns(): Promise<PatternResponse[]> {
   const res = await fetch(`${BASE_URL}/v1/patterns`);
@@ -150,26 +154,6 @@ export async function listPatterns(): Promise<PatternResponse[]> {
 export async function getPattern(id: string): Promise<PatternResponse> {
   const res = await fetch(`${BASE_URL}/v1/patterns/${id}`);
   return jsonOrThrow<PatternResponse>(res);
-}
-
-export interface NewPattern {
-  name: string;
-  family?: string;
-  kind?: 'floor' | 'border';
-  photo_key: string;
-  captured_at: string;
-  geo_lat?: number | null;
-  geo_lng?: number | null;
-  place_name?: string | null;
-  pipeline: PipelineOutput;
-  layers: Record<string, string>;
-  /**
-   * The job that produced `pipeline`. Additive: with it the backend records
-   * the settings and pipeline version behind this pattern.
-   */
-  job_id?: string;
-  /** Where the photo came from. Recorded on the capture. */
-  source?: 'web' | 'mobile';
 }
 
 async function requestUploadUrl(contentType: string): Promise<{

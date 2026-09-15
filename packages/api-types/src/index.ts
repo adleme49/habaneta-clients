@@ -1,124 +1,87 @@
-// Shared wire types between the habaneta-backend service and its clients
-// (apps/web, apps/mobile). Pure types — no runtime exports — so consumers
-// can import via `@habaneta/api-types` without bundling overhead.
+// The habaneta-backend wire contract.
 //
-// The shape mirrors what the Rust backend emits in
-// `habaneta-backend/src/types.rs`. Backend changes that add fields are
-// safe to absorb additively here; breaking changes need a coordinated
-// release across all three repos.
+// These types are GENERATED from `openapi.json`, which the backend emits from
+// its own Rust types. Do not hand-edit them, and do not re-declare a request or
+// response shape in an app — that is the duplication this package exists to
+// remove. To pull in a backend change:
+//
+//     pnpm gen:api            # sibling checkout at ../backend
+//     pnpm gen:api --staging  # or fetch from the deployed backend
+//
+// This file is the curated surface: flat, readable aliases over the generated
+// `components['schemas']` tree, so consumers write `Pattern` rather than
+// `components['schemas']['Pattern']`. Adding an endpoint means adding an alias
+// here; the generated file itself is never edited.
 
-export type Vec2 = [number, number];
+import type { components, operations } from './generated';
 
-export type Transform =
-  | { kind: 'identity' }
-  | { kind: 'rotate'; degrees: number }
-  | { kind: 'reflect'; axis_degrees: number };
+type Schemas = components['schemas'];
 
-export interface Atom {
-  id: string;
-  /** Raw SVG markup. Each atom is `<svg viewBox="…">` containing `<path
-   *  class="layer-N">` per quantized layer + optional `<path class="contour">`. */
-  svg: string;
-}
+// ---------- Pipeline output ----------
 
-export interface Lattice {
-  basis_a: Vec2;
-  basis_b: Vec2;
-}
+/** Everything the image pipeline extracted from one photo. */
+export type PipelineOutput = Schemas['PipelineOutput'];
+export type Atom = Schemas['Atom'];
+export type Composition = Schemas['Composition'];
+export type Lattice = Schemas['Lattice'];
+export type Cell = Schemas['Cell'];
+export type Transform = Schemas['Transform'];
+export type Color = Schemas['Color'];
+export type Quality = Schemas['Quality'];
 
-export interface Cell {
-  atom_id: string;
-  position: Vec2;
-  transform: Transform;
-}
+/** Lattice basis vectors, as the contract declares them: exactly two floats. */
+export type Vec2 = Lattice['basis_a'];
 
-export interface Composition {
-  lattice: Lattice;
-  cells: Cell[];
-}
-
-export interface PipelineOutput {
-  atoms: Atom[];
-  composition: Composition;
-  /**
-   * Layer colors, indexed by N (paths in atoms carry `class="layer-N"`).
-   * Frontend treats `palette.length` as authoritative — the backend may
-   * clamp or auto-detect the layer count.
-   */
-  palette: { hex: string }[];
-  /**
-   * Color of the contour layer (paths carry `class="contour"`). Null when
-   * the contour pass was disabled or no thin components survived the
-   * thickness gate.
-   */
-  contour: { hex: string } | null;
-  /**
-   * Backend-reported pipeline metadata. `passes` lists named stages that
-   * actually ran (e.g. `"bilateral"`, `"contour"`, `"auto_layers"`).
-   * `"auto_layers"` is emitted iff k was auto-detected.
-   */
-  quality?: { passes: string[] };
-}
+// ---------- Jobs ----------
 
 /**
- * Optional per-job parameters for `POST /v1/jobs`. Send only fields the
- * user explicitly changed; omitted fields fall back to server defaults.
- * Setting `contour: null` disables the contour pass entirely.
+ * The settings a run was executed with. Every field is present here because
+ * this is the *sanitised* form the server stored — see `JobParamsInput` for
+ * what a client sends.
  */
-export interface JobParams {
-  target_px?: number;
-  layers?: number;
-  denoise?: number;
-  min_region_px?: number;
-  auto_levels?: boolean;
-  contour?: { sensitivity?: number; max_thickness?: number } | null;
-}
-
-export type JobStatus = 'queued' | 'running' | 'done' | 'failed';
-
-export interface JobStatusResponse {
-  status: JobStatus;
-  error?: string;
-}
+export type JobParams = Schemas['JobParams'];
 
 /**
- * A persisted pattern (stored cloud-side once the backend gains the
- * /v1/patterns API in v1 of the platform). Embeds the full
- * `PipelineOutput` directly. Capture metadata fields are nullable —
- * `geo_lat`/`geo_lng`/`place_name` are optional per the v1 design.
- *
- * Forward-declared here so the web app and (future) mobile app share a
- * single type. Backend implementation lands in a follow-up.
+ * What a client sends to `POST /v1/jobs`. Every knob is optional: send only
+ * what the user actually changed so server defaults survive, which is what
+ * lets the backend change a default without a client release.
  */
-export interface Pattern {
-  id: string;
-  name: string;
-  family: string;
-  kind: 'floor' | 'border';
-  /**
-   * How the pattern came to be. `captured` is the only value produced today;
-   * the others exist because a pattern no longer has to come from a photo.
-   */
-  origin: 'captured' | 'authored' | 'generated' | 'remixed' | 'imported';
-  /**
-   * The capture behind this pattern. Null for a pattern with no photo —
-   * authored in the editor, or generated. Nothing produces those yet.
-   */
-  photo_key: string | null;
-  captured_at: string | null; // ISO timestamp
-  geo_lat: number | null;
-  geo_lng: number | null;
-  place_name: string | null;
-  pipeline: PipelineOutput;
-  /** Effective colours: the default colourway's overrides. */
-  layers: Record<string, string>;
-  /**
-   * The pipeline version and settings that produced this pattern, from its
-   * derivation. Null for patterns saved before runs were recorded, and for
-   * any save that doesn't pass a `job_id`.
-   */
-  pipeline_version: string | null;
-  params: JobParams | null;
-  created_at: string;
-  updated_at: string;
-}
+export type JobParamsInput = Partial<
+  Omit<JobParams, 'contour'> & { contour: Partial<ContourParams> | null }
+>;
+
+export type ContourParams = Schemas['ContourParams'];
+export type JobCreated = Schemas['JobCreated'];
+export type JobStatusResponse = Schemas['StatusBody'];
+
+/** The four states a run moves through. Enumerated in the contract. */
+export type JobStatus = Schemas['JobStatus'];
+
+// ---------- Patterns ----------
+
+/** A saved pattern. `photo_key` and `captured_at` are null when no capture backs it. */
+export type Pattern = Schemas['Pattern'];
+export type PatternResponse = Schemas['PatternResponse'];
+export type NewPattern = Schemas['NewPattern'];
+export type PatchPattern = Schemas['PatchPattern'];
+
+/** How a pattern came to be. Only `captured` is produced today. */
+export type PatternOrigin =
+  | 'captured'
+  | 'authored'
+  | 'generated'
+  | 'remixed'
+  | 'imported';
+
+// ---------- Uploads & health ----------
+
+export type UploadRequest = Schemas['UploadRequest'];
+export type UploadUrlResponse = Schemas['UploadResponse'];
+export type HealthBody = Schemas['HealthBody'];
+export type ComponentStatus = Schemas['ComponentStatus'];
+
+/** Every non-2xx response from the API has this shape. */
+export type ErrorBody = Schemas['ErrorBody'];
+
+// The raw generated trees, for anything the aliases above don't cover.
+export type { components, operations, paths } from './generated';
