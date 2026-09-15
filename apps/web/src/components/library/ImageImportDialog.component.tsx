@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   checkHealth,
   HabanetaBackendError,
-  JobParams,
+  JobParamsInput,
   JobStatus,
   PipelineOutput,
   runImageImport,
@@ -145,8 +145,8 @@ const ImageImportDialog: React.FC = () => {
     });
   };
 
-  const buildJobParams = (): JobParams => {
-    const out: JobParams = {};
+  const buildJobParams = (): JobParamsInput => {
+    const out: JobParamsInput = {};
     if (touched.has('target_px')) out.target_px = params.target_px;
     // Layers: only send when the user opted out of Auto. Per backend
     // contract, leaving the field out (not null, not 0) triggers

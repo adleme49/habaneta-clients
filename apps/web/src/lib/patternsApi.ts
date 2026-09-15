@@ -5,53 +5,22 @@
 // Mirrors `habanetaBackend.ts`'s shape (typed fetches, AbortController,
 // tiny error class) so the two API surfaces feel consistent.
 
-import type { Dict } from '../context/interfaces';
-import type { Pattern, PipelineOutput } from '@habaneta/api-types';
+import type {
+  NewPattern,
+  PatchPattern,
+  PatternResponse,
+  UploadUrlResponse,
+} from '@habaneta/api-types';
 import { HabanetaBackendError } from './habanetaBackend';
+
+// Re-exported for the call sites that already import these from here. The
+// definitions live in @habaneta/api-types, generated from the backend's
+// OpenAPI document — never re-declare a wire shape in an app.
+export type { NewPattern, PatchPattern, PatternResponse, UploadUrlResponse };
 
 const BASE_URL =
   (import.meta.env.VITE_HABANETA_API as string | undefined) ??
   'http://localhost:8080';
-
-/** A pattern with a freshly-signed photo URL. */
-export interface PatternResponse extends Pattern {
-  /** Time-limited URL (1h) that resolves to the original photo bytes. */
-  photo_url?: string | null;
-}
-
-export interface UploadUrlResponse {
-  photo_key: string;
-  presigned_put_url: string;
-  expires_in_seconds: number;
-}
-
-export interface NewPattern {
-  name: string;
-  family?: string;
-  kind?: 'floor' | 'border';
-  photo_key: string;
-  captured_at: string; // ISO timestamp
-  geo_lat?: number | null;
-  geo_lng?: number | null;
-  place_name?: string | null;
-  pipeline: PipelineOutput;
-  layers: Dict<string>;
-  /**
-   * The job that produced `pipeline`. Additive: with it the backend records
-   * the settings and pipeline version behind this pattern, so it can be
-   * reproduced, re-run and compared. Without it the pattern still saves.
-   */
-  job_id?: string;
-  /** Where the photo came from. Recorded on the capture. */
-  source?: 'web' | 'mobile';
-}
-
-export interface PatchPattern {
-  name?: string;
-  family?: string;
-  place_name?: string | null;
-  layers?: Dict<string>;
-}
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {

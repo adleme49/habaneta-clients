@@ -1,0 +1,1275 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Habaneta backend",
+    "description": "Image pipeline and pattern collection for the Habaneta platform.\n\nPhoto bytes never pass through this API: the client presigns an upload, PUTs the bytes to object storage directly, and then registers the pattern by key. Single-user for now — no authentication, no tenancy.",
+    "license": {
+      "name": ""
+    },
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local development"
+    },
+    {
+      "url": "https://habaneta-backend-staging.fly.dev",
+      "description": "Staging"
+    },
+    {
+      "url": "https://habaneta-backend-production.fly.dev",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "`GET /healthz` — liveness + best-effort readiness.",
+        "description": "Returns 200 with a per-component status body. The body is always\nJSON so monitoring can distinguish \"process up but DB unreachable\"\nfrom \"process down\" without a separate readiness endpoint.",
+        "operationId": "healthz",
+        "responses": {
+          "200": {
+            "description": "Always 200 so naive uptime checks don't flap; read `status` and `components` to tell a healthy process from a degraded one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "operationId": "submitJob",
+        "requestBody": {
+          "description": "`image` is the photo bytes. `params` is an optional JSON blob of `JobParams`; send only the fields the user changed so server defaults survive.",
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "description": "Documents the multipart body of `POST /v1/jobs`. Not constructed in Rust —\nthe handler reads the fields off the multipart stream directly — but it is\nwhat the generated clients type the request against.",
+                "required": [
+                  "image"
+                ],
+                "properties": {
+                  "image": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The photo. JPEG, PNG or HEIC."
+                  },
+                  "params": {
+                    "oneOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "$ref": "#/components/schemas/JobParams",
+                        "description": "JSON-encoded `JobParams`."
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted; the pipeline runs off the request path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing image field, or unparseable params",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "operationId": "getJobStatus",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job id from POST /v1/jobs",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current state of the run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job. The store is in-memory, so a restart forgets it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{id}/result": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "operationId": "getJobResult",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job id from POST /v1/jobs",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The extracted pattern",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineOutput"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "425": {
+            "description": "Still queued or running; poll the status endpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The run failed; the body carries the cause",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/patterns": {
+      "get": {
+        "tags": [
+          "patterns"
+        ],
+        "operationId": "listPatterns",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Clamped to 1..=1000. Defaults to 100.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The collection, newest capture first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PatternResponse"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No database configured on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "patterns"
+        ],
+        "operationId": "createPattern",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPattern"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatternResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty name or photo_key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No database configured on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/patterns/{id}": {
+      "get": {
+        "tags": [
+          "patterns"
+        ],
+        "operationId": "getPattern",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Pattern id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatternResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such pattern",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No database configured on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "patterns"
+        ],
+        "operationId": "deletePattern",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Pattern id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted. The capture goes too unless another pattern still derives from it"
+          },
+          "503": {
+            "description": "No database configured on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "patterns"
+        ],
+        "operationId": "patchPattern",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Pattern id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchPattern"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatternResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such pattern",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No database configured on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/upload-url": {
+      "post": {
+        "tags": [
+          "uploads"
+        ],
+        "operationId": "createUploadUrl",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A presigned PUT the client uploads to directly",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported content type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Object storage is not configured on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Atom": {
+        "type": "object",
+        "description": "One distinct shape in a pattern, as a standalone SVG document.",
+        "required": [
+          "id",
+          "svg"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable within one pattern; referenced by `Cell::atom_id`.",
+            "example": "atom-0"
+          },
+          "svg": {
+            "type": "string",
+            "description": "`<svg viewBox=\"0 0 W H\">` holding one `<path class=\"layer-N\">` per\npalette entry and an optional `<path class=\"contour\">`. Paths are\nabsolute cubic Béziers. Colour is deliberately *not* baked in — the\nclient binds each class to a CSS custom property so recolouring never\nre-parses the SVG."
+          }
+        }
+      },
+      "Cell": {
+        "type": "object",
+        "description": "One placement of one atom within the lattice.",
+        "required": [
+          "atom_id",
+          "position",
+          "transform"
+        ],
+        "properties": {
+          "atom_id": {
+            "type": "string",
+            "description": "Matches an `Atom::id` in the same pattern."
+          },
+          "position": {
+            "type": "array",
+            "items": false,
+            "prefixItems": [
+              {
+                "type": "integer",
+                "format": "int32"
+              },
+              {
+                "type": "integer",
+                "format": "int32"
+              }
+            ],
+            "description": "Integer lattice coordinates, not pixels."
+          },
+          "transform": {
+            "$ref": "#/components/schemas/Transform"
+          }
+        }
+      },
+      "Color": {
+        "type": "object",
+        "description": "An sRGB colour.",
+        "required": [
+          "hex"
+        ],
+        "properties": {
+          "hex": {
+            "type": "string",
+            "example": "#99a361"
+          }
+        }
+      },
+      "ComponentStatus": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "skipped_not_configured"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "error",
+              "status"
+            ],
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Per-dependency state. `skipped_not_configured` means the process booted\nwithout that dependency wired, which is a supported local-dev posture, not\na fault."
+      },
+      "Components": {
+        "type": "object",
+        "required": [
+          "db",
+          "r2"
+        ],
+        "properties": {
+          "db": {
+            "$ref": "#/components/schemas/ComponentStatus"
+          },
+          "r2": {
+            "$ref": "#/components/schemas/ComponentStatus"
+          }
+        }
+      },
+      "Composition": {
+        "type": "object",
+        "description": "How the atoms tile the plane.",
+        "required": [
+          "lattice",
+          "cells"
+        ],
+        "properties": {
+          "cells": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Cell"
+            }
+          },
+          "lattice": {
+            "$ref": "#/components/schemas/Lattice"
+          }
+        }
+      },
+      "ContourParams": {
+        "type": "object",
+        "description": "Tuning for the pass that recovers grout lines and glaze edges.",
+        "properties": {
+          "max_thickness": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Dark regions thicker than this many pixels are treated as a real colour\nlayer rather than an outline. Clamped to 1..=32.",
+            "default": 4,
+            "example": 4,
+            "minimum": 0
+          },
+          "sensitivity": {
+            "type": "number",
+            "format": "float",
+            "description": "Higher catches finer and lighter lines. Clamped to 0.0..=1.0.",
+            "default": 0.4000000059604645,
+            "example": 0.4
+          }
+        },
+        "additionalProperties": false
+      },
+      "ErrorBody": {
+        "type": "object",
+        "description": "Every non-2xx response from this API has this shape.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable cause. Safe to surface; never contains secrets.",
+            "example": "pattern 0c8f… not found"
+          }
+        }
+      },
+      "HealthBody": {
+        "type": "object",
+        "required": [
+          "status",
+          "components"
+        ],
+        "properties": {
+          "components": {
+            "$ref": "#/components/schemas/Components"
+          },
+          "status": {
+            "type": "string",
+            "description": "`ok` or `degraded`.",
+            "example": "ok"
+          }
+        }
+      },
+      "JobCreated": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Poll `GET /v1/jobs/{id}`, then fetch the result. Cite this id when\nsaving the pattern so the save records what settings produced it."
+          }
+        }
+      },
+      "JobParams": {
+        "type": "object",
+        "description": "Optional knobs for `POST /v1/jobs`. Every field has a server default, so a\nclient should send only what the user actually changed — that way a default\nchanging server-side doesn't need a client release. Sending `contour: null`\ndisables the contour pass; omitting it keeps the default pass enabled.",
+        "properties": {
+          "auto_levels": {
+            "type": "boolean",
+            "description": "Per-channel 1%–99% percentile stretch before quantisation.",
+            "default": false
+          },
+          "contour": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ContourParams",
+                "description": "`null` disables the contour pass entirely."
+              }
+            ],
+            "default": {
+              "max_thickness": 4,
+              "sensitivity": 0.4000000059604645
+            }
+          },
+          "denoise": {
+            "type": "number",
+            "format": "float",
+            "description": "Bilateral filter strength, 0.0 (off) to 1.0 (aggressive). Expands into\nkernel radius plus spatial and colour sigmas.",
+            "default": 0.30000001192092896,
+            "example": 0.3
+          },
+          "layers": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "`null` or omitted → auto-detect via the SSE elbow on a downsampled\nbuffer, and `quality.passes` will include `auto_layers`. A number uses\nexactly that many colour clusters, clamped to 2..=16.",
+            "default": null,
+            "minimum": 0
+          },
+          "min_region_px": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Connected components smaller than this (in px²) are dropped during\nvectorisation.",
+            "default": 16,
+            "example": 16,
+            "minimum": 0
+          },
+          "target_px": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Longest edge the image is resized to before processing. Clamped to 256..=4096.",
+            "default": 1024,
+            "example": 1024,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "JobStatus": {
+        "type": "string",
+        "description": "The four states a run moves through.",
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed"
+        ]
+      },
+      "Lattice": {
+        "type": "object",
+        "description": "The repeating unit's two basis vectors, in atom-space pixels.",
+        "required": [
+          "basis_a",
+          "basis_b"
+        ],
+        "properties": {
+          "basis_a": {
+            "type": "array",
+            "items": false,
+            "prefixItems": [
+              {
+                "type": "number",
+                "format": "float"
+              },
+              {
+                "type": "number",
+                "format": "float"
+              }
+            ]
+          },
+          "basis_b": {
+            "type": "array",
+            "items": false,
+            "prefixItems": [
+              {
+                "type": "number",
+                "format": "float"
+              },
+              {
+                "type": "number",
+                "format": "float"
+              }
+            ]
+          }
+        }
+      },
+      "NewPattern": {
+        "type": "object",
+        "description": "Body for `POST /v1/patterns`.",
+        "required": [
+          "name",
+          "photo_key",
+          "captured_at",
+          "pipeline",
+          "layers"
+        ],
+        "properties": {
+          "captured_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "family": {
+            "type": "string"
+          },
+          "geo_lat": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "geo_lng": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The job that produced `pipeline`. Optional and additive: when present\nthe derivation inherits the run's params, pipeline version and image\nhash, which is what makes a saved pattern reproducible. When absent the\npattern is still saved, with a derivation that honestly records nothing\nabout how it was produced."
+          },
+          "kind": {
+            "type": "string"
+          },
+          "layers": {
+            "type": "object",
+            "description": "Effective colours keyed `layer-N` / `contour`. Stored as the default\ncolourway's overrides, not as a second copy of the palette.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "example": {
+              "layer-0": "#99a361"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "photo_key": {
+            "type": "string"
+          },
+          "pipeline": {
+            "$ref": "#/components/schemas/PipelineOutput"
+          },
+          "place_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": "Where the photo came from: web | mobile | unknown."
+          }
+        }
+      },
+      "PatchPattern": {
+        "type": "object",
+        "description": "Mutable fields on `PATCH /v1/patterns/:id`. An omitted field is left\nunchanged; `place_name: null` explicitly clears it.",
+        "properties": {
+          "family": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "layers": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "place_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Lands on the pattern's capture, so it also changes for any sibling\npattern extracted from the same photo."
+          }
+        }
+      },
+      "Pattern": {
+        "type": "object",
+        "description": "A pattern as the API serves it: the aggregate flattened back into the shape\nclients already consume, plus the provenance fields the new model can now\nanswer (`origin`, `pipeline_version`, `params`).",
+        "required": [
+          "id",
+          "name",
+          "family",
+          "kind",
+          "origin",
+          "pipeline",
+          "layers",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "captured_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "family": {
+            "type": "string",
+            "description": "Display grouping in the library, e.g. \"My Imports\"."
+          },
+          "geo_lat": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "geo_lng": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`floor` or `border`."
+          },
+          "layers": {
+            "type": "object",
+            "description": "Effective colours: the default colourway's overrides, keyed `layer-N`\nand `contour`.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "example": {
+              "contour": "#343d07",
+              "layer-0": "#99a361"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string",
+            "description": "How the pattern came to be: `captured`, `authored`, `generated`,\n`remixed` or `imported`. Denormalised from the pattern's derivation so\nlisting stays join-free."
+          },
+          "params": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobParams",
+                "description": "The settings that produced this pattern. `null` when the save didn't\ncite a job, and for migrated rows where they were never recorded."
+              }
+            ]
+          },
+          "photo_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The capture behind this pattern. `null` for a pattern with no photo —\nauthored in the editor, or generated. Nothing produces those yet."
+          },
+          "pipeline": {
+            "$ref": "#/components/schemas/PipelineOutput"
+          },
+          "pipeline_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The pipeline version behind this pattern, from its derivation. `null`\nfor patterns saved before runs were recorded; `v2-legacy` for rows\nmigrated from the pre-split schema."
+          },
+          "place_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PatternResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Pattern"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "photo_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Time-limited URL that resolves to the original photo bytes in\nR2. Renewed on every fetch — clients shouldn't cache this."
+              }
+            }
+          }
+        ]
+      },
+      "PipelineOutput": {
+        "type": "object",
+        "description": "Everything the image pipeline extracted from one photo.",
+        "required": [
+          "atoms",
+          "composition",
+          "palette",
+          "quality"
+        ],
+        "properties": {
+          "atoms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Atom"
+            },
+            "description": "The distinct shapes in the pattern. One today; symmetry detection will\nproduce several."
+          },
+          "composition": {
+            "$ref": "#/components/schemas/Composition"
+          },
+          "contour": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Color",
+                "description": "Colour of the thin dark outlines, when the contour pass ran."
+              }
+            ]
+          },
+          "palette": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Color"
+            },
+            "description": "Colour per layer, indexed by the `N` in an atom's `layer-N` class.\nAuthoritative: the server may clamp or auto-pick the layer count, so\nthis can differ in length from what the client asked for."
+          },
+          "quality": {
+            "$ref": "#/components/schemas/Quality"
+          }
+        }
+      },
+      "Quality": {
+        "type": "object",
+        "description": "Which optional passes actually ran, for surfacing in the UI.",
+        "required": [
+          "passes"
+        ],
+        "properties": {
+          "passes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names of preprocess/quantize/contour passes that actually ran, in execution order.\nFuture repair stats (glare_px, shadow_px, flatten_dB, ...) get added as additive fields\nonly once the corresponding pass lands — don't pre-design fields with no producer.",
+            "example": [
+              "bilateral",
+              "contour",
+              "auto_layers"
+            ]
+          }
+        }
+      },
+      "StatusBody": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Present only when `status` is `failed`."
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          }
+        }
+      },
+      "Transform": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "identity"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "degrees",
+              "kind"
+            ],
+            "properties": {
+              "degrees": {
+                "type": "number",
+                "format": "float"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "rotate"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "axis_degrees",
+              "kind"
+            ],
+            "properties": {
+              "axis_degrees": {
+                "type": "number",
+                "format": "float"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "reflect"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What to do to the atom before placing it. Only `identity` is produced today;\nthe rotate and reflect variants exist for symmetry detection."
+      },
+      "UploadRequest": {
+        "type": "object",
+        "required": [
+          "content_type"
+        ],
+        "properties": {
+          "content_type": {
+            "type": "string",
+            "description": "Client-declared content-type. Used to:\n  1. Pick the file extension on the R2 key.\n  2. Bind the same content-type into the presigned signature so\n     the actual PUT can't smuggle a different mime.",
+            "example": "image/jpeg"
+          }
+        }
+      },
+      "UploadResponse": {
+        "type": "object",
+        "required": [
+          "photo_key",
+          "presigned_put_url",
+          "expires_in_seconds"
+        ],
+        "properties": {
+          "expires_in_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "photo_key": {
+            "type": "string",
+            "description": "Reference this in `POST /v1/patterns` after the PUT succeeds.",
+            "example": "photos/1f89aab7-8987-4a66-984b-cb3c4e4616bb.jpg"
+          },
+          "presigned_put_url": {
+            "type": "string",
+            "description": "PUT the raw bytes here with the same `Content-Type` that was requested."
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "jobs",
+      "description": "Submit a photo, poll the run, fetch the extracted pattern."
+    },
+    {
+      "name": "patterns",
+      "description": "The saved collection."
+    },
+    {
+      "name": "uploads",
+      "description": "Presigned direct-to-storage photo uploads."
+    },
+    {
+      "name": "health",
+      "description": "Liveness and per-dependency readiness."
+    }
+  ]
+}

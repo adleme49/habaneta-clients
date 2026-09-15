@@ -10,9 +10,12 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "gen:api": "./scripts/gen-api.sh",
+    "gen:api:check": "./scripts/gen-api.sh --check"
   },
   "devDependencies": {
+    "openapi-typescript": "^7.13.0",
     "typescript": "^5.4.0"
   }
 }

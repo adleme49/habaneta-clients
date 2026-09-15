@@ -2,14 +2,16 @@
   "name": "habaneta-clients",
   "version": "0.0.0",
   "private": true,
-  "description": "Habaneta clients monorepo — web (Vite) and mobile (Expo).",
+  "description": "Habaneta clients monorepo \u2014 web (Vite) and mobile (Expo).",
   "packageManager": "pnpm@10.7.0",
   "scripts": {
     "dev:web": "pnpm --filter @habaneta/web dev",
     "dev:mobile": "pnpm --filter @habaneta/mobile start",
     "build:web": "pnpm --filter @habaneta/web build",
     "build:types": "pnpm --filter @habaneta/api-types build",
-    "test:smoke": "pnpm --filter @habaneta/web test:smoke"
+    "test:smoke": "pnpm --filter @habaneta/web test:smoke",
+    "gen:api": "pnpm --filter @habaneta/api-types gen:api",
+    "gen:api:check": "pnpm --filter @habaneta/api-types gen:api:check"
   },
   "pnpm": {
     "overrides": {

@@ -20,6 +20,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The wire types are generated from the backend's OpenAPI document. This
+      # catches a spec that was updated without regenerating; the backend's own
+      # CI catches a spec that drifted from its handlers.
+      - name: Generated types match the vendored spec
+        run: pnpm --filter @habaneta/api-types gen:api:check
+
       - name: Build web (includes tsc)
         run: pnpm --filter @habaneta/web build
 

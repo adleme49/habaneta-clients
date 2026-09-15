@@ -9,8 +9,26 @@ apps/
   web/          # Vite + React tile editor (current production app)
   mobile/       # Expo + React Native pattern-hunter app  (added in v1)
 packages/
-  api-types/    # Shared TypeScript types for the backend wire contract
+  api-types/    # Wire contract, GENERATED from the backend's OpenAPI document
 ```
+
+## The wire contract
+
+`packages/api-types` is **generated**, not hand-written. The backend emits an
+OpenAPI document from its own Rust types; `openapi.json` is vendored here and
+`src/generated.ts` is produced from it. Never re-declare a request or response
+shape in an app — import it from `@habaneta/api-types`.
+
+```bash
+pnpm gen:api          # regenerate from the sibling checkout at ../backend
+pnpm gen:api --staging  # or from the deployed staging backend
+pnpm gen:api:check    # verify the committed output is current (CI runs this)
+```
+
+`src/index.ts` is the curated surface: readable aliases over the generated
+tree. Two are worth knowing about. `JobParams` is the *stored* form, with every
+field present, and `JobParamsInput` is what a client sends, where every knob is
+optional so server defaults survive.
 
 ## Tooling
 

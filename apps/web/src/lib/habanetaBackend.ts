@@ -7,19 +7,24 @@
 export type {
   Atom,
   Cell,
+  Color,
   Composition,
   JobParams,
+  JobParamsInput,
   JobStatus,
   JobStatusResponse,
   Lattice,
   Pattern,
+  PatternOrigin,
   PipelineOutput,
+  Quality,
   Transform,
   Vec2,
 } from '@habaneta/api-types';
 
 import type {
   JobParams,
+  JobParamsInput,
   JobStatus,
   JobStatusResponse,
   PipelineOutput,
@@ -68,7 +73,7 @@ export async function checkHealth(signal?: AbortSignal): Promise<boolean> {
 
 export async function submitJob(
   file: File,
-  params?: JobParams,
+  params?: JobParamsInput,
   signal?: AbortSignal
 ): Promise<string> {
   const form = new FormData();
@@ -111,7 +116,7 @@ export interface PollOptions {
   /** Called on each status change so the UI can show progress. */
   onStatus?: (status: JobStatus) => void;
   /** Per-job extraction parameters; omit any field to use server defaults. */
-  params?: JobParams;
+  params?: JobParamsInput;
   signal?: AbortSignal;
 }
 
